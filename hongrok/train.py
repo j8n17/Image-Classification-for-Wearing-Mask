@@ -92,7 +92,7 @@ def train(data_dir, model_dir, args):
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    # -- dataset
+    # -- dataset # label 3개로 바꾸기
     dataset_module = getattr(import_module("dataset"), args.dataset)  # default: BaseAugmentation
     dataset = dataset_module(
         data_dir=data_dir,
@@ -129,14 +129,14 @@ def train(data_dir, model_dir, args):
         drop_last=True,
     )
 
-    # -- model
+    # -- model # 모델 바꾸기
     model_module = getattr(import_module("model"), args.model)  # default: BaseModel
     model = model_module(
         num_classes=num_classes
     ).to(device)
     model = torch.nn.DataParallel(model)
 
-    # -- loss & metric
+    # -- loss & metric # criterion추가
     criterion = create_criterion(args.criterion)  # default: cross_entropy
     opt_module = getattr(import_module("torch.optim"), args.optimizer)  # default: SGD
     optimizer = opt_module(
@@ -159,34 +159,34 @@ def train(data_dir, model_dir, args):
         loss_value = 0
         matches = 0
         for idx, train_batch in enumerate(train_loader):
-            inputs, labels = train_batch
+            inputs, labels = train_batch # labels 수정
             inputs = inputs.to(device)
             labels = labels.to(device)
 
             optimizer.zero_grad()
 
-            outs = model(inputs)
-            preds = torch.argmax(outs, dim=-1)
-            loss = criterion(outs, labels)
+            outs = model(inputs) # output 추가
+            preds = torch.argmax(outs, dim=-1) # ?
+            loss = criterion(outs, labels) # loss 추가
 
             loss.backward()
             optimizer.step()
 
             loss_value += loss.item()
-            matches += (preds == labels).sum().item()
+            matches += (preds == labels).sum().item() # 수정
             if (idx + 1) % args.log_interval == 0:
                 train_loss = loss_value / args.log_interval
-                train_acc = matches / args.batch_size / args.log_interval
+                train_acc = matches / args.batch_size / args.log_interval #수정
                 current_lr = get_lr(optimizer)
                 print(
                     f"Epoch[{epoch}/{args.epochs}]({idx + 1}/{len(train_loader)}) || "
-                    f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}"
+                    f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}" #수정
                 )
                 logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
-                logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
+                logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx) #수정
 
                 loss_value = 0
-                matches = 0
+                matches = 0 #수정
 
         scheduler.step()
 
@@ -195,22 +195,22 @@ def train(data_dir, model_dir, args):
             print("Calculating validation results...")
             model.eval()
             val_loss_items = []
-            val_acc_items = []
+            val_acc_items = [] #수정
             figure = None
             for val_batch in val_loader:
-                inputs, labels = val_batch
+                inputs, labels = val_batch #label 수정
                 inputs = inputs.to(device)
-                labels = labels.to(device)
+                labels = labels.to(device) #
 
                 outs = model(inputs)
-                preds = torch.argmax(outs, dim=-1)
+                preds = torch.argmax(outs, dim=-1) # 수정
 
                 loss_item = criterion(outs, labels).item()
-                acc_item = (labels == preds).sum().item()
+                acc_item = (labels == preds).sum().item() #수정
                 val_loss_items.append(loss_item)
-                val_acc_items.append(acc_item)
+                val_acc_items.append(acc_item)#수정
 
-                if figure is None:
+                if figure is None: # 수정
                     inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
                     inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
                     figure = grid_image(
@@ -218,9 +218,9 @@ def train(data_dir, model_dir, args):
                     )
 
             val_loss = np.sum(val_loss_items) / len(val_loader)
-            val_acc = np.sum(val_acc_items) / len(val_set)
+            val_acc = np.sum(val_acc_items) / len(val_set) #수정
             best_val_loss = min(best_val_loss, val_loss)
-            if val_acc > best_val_acc:
+            if val_acc > best_val_acc: #수정
                 print(f"New best model for val accuracy : {val_acc:4.2%}! saving the best model..")
                 torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
                 best_val_acc = val_acc
@@ -228,9 +228,9 @@ def train(data_dir, model_dir, args):
             print(
                 f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
                 f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
-            )
+            )#수정
             logger.add_scalar("Val/loss", val_loss, epoch)
-            logger.add_scalar("Val/accuracy", val_acc, epoch)
+            logger.add_scalar("Val/accuracy", val_acc, epoch)#수정
             logger.add_figure("results", figure, epoch)
             print()
 
