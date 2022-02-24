@@ -111,12 +111,12 @@ class MaskBaseDataset(Dataset):
 
     _file_names = {
         "mask1": MaskLabels.MASK,
-        #"mask2": MaskLabels.MASK,
-        #"mask3": MaskLabels.MASK,
-        #"mask4": MaskLabels.MASK,
+        "mask2": MaskLabels.MASK,
+        "mask3": MaskLabels.MASK,
+        "mask4": MaskLabels.MASK,
         #"mask5": MaskLabels.MASK,
-        "incorrect_mask": MaskLabels.INCORRECT,
-        "normal": MaskLabels.NORMAL
+        #"incorrect_mask": MaskLabels.INCORRECT,
+        #"normal": MaskLabels.NORMAL
     }
 
     image_paths = []
@@ -182,6 +182,7 @@ class MaskBaseDataset(Dataset):
         mask_label = self.get_mask_label(index)
         gender_label = self.get_gender_label(index)
         age_label = self.get_age_label(index)
+        mask_label = 0 # mask를 loss에서 제외시키기 위함
         multi_class_label = self.encode_multi_class(mask_label, gender_label, age_label)
 
         image_transform = self.transform(image)

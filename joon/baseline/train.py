@@ -131,24 +131,24 @@ def train(data_dir, model_dir, args):
 
     # -- model
     model_module = getattr(import_module("model"), args.model)  # default: BaseModel
-    # 저장된 모델 불러와서 학습
-    # model_path = os.path.join(args.model_dir, 'exp23', 'best.pth')
-    # model.load_state_dict(torch.load(model_path, map_location=device))
-    # 리셋된 모델 학습
     model = model_module(
         num_classes=num_classes
     ).to(device)
+    # 저장된 모델 불러와서 학습
+    #model_path = os.path.join(args.model_dir, 'onlymask_im', 'best.pth')
+    #model.load_state_dict(torch.load(model_path, map_location=device))
+    
 
     # pretrain된 데이터와 높은 유사성을 가질 때 사용하는 parameter freeze
-    if "Pre" in model.__class__.__name__:
+    '''if "Pre" in model.__class__.__name__:
         for name, para in model.named_parameters():
             if "resnet18.fc" in name:
                 para.requires_grad = True
-            #elif "resnet18.layer4" in name:
-                #para.requires_grad = True
+            elif "resnet18.layer4" in name:
+                para.requires_grad = True
             else:
                 para.requires_grad = False
-
+    '''
     model = torch.nn.DataParallel(model)
 
     # -- loss & metric
