@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision import models
 
 
 class BaseModel(nn.Module):
@@ -33,6 +34,15 @@ class BaseModel(nn.Module):
         x = x.view(-1, 128)
         return self.fc(x)
 
+
+class Preresnet18(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.resnet18 = models.resnet18(pretrained=True)
+        self.resnet18.fc = nn.Linear(self.resnet18.fc.in_features, num_classes)
+
+    def forward(self, x):
+        return self.resnet18(x)
 
 # Custom Model Template
 class MyModel(nn.Module):
