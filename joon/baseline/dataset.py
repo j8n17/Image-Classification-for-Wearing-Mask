@@ -111,10 +111,10 @@ class MaskBaseDataset(Dataset):
 
     _file_names = {
         "mask1": MaskLabels.MASK,
-        "mask2": MaskLabels.MASK,
-        "mask3": MaskLabels.MASK,
-        "mask4": MaskLabels.MASK,
-        "mask5": MaskLabels.MASK,
+        #"mask2": MaskLabels.MASK,
+        #"mask3": MaskLabels.MASK,
+        #"mask4": MaskLabels.MASK,
+        #"mask5": MaskLabels.MASK,
         "incorrect_mask": MaskLabels.INCORRECT,
         "normal": MaskLabels.NORMAL
     }
