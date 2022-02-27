@@ -8,8 +8,7 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, Subset, random_split
-from torchvision import transforms
-from torchvision.transforms import *
+from torchvision.transforms import Resize, ToTensor, Normalize, Compose, CenterCrop, ColorJitter, RandomPerspective
 
 IMG_EXTENSIONS = [
     ".jpg", ".JPG", ".jpeg", ".JPEG", ".png",
@@ -23,8 +22,8 @@ def is_image_file(filename):
 
 class BaseAugmentation:
     def __init__(self, resize, mean, std, **args):
-        self.transform = transforms.Compose([
-            Resize(resize, Image.BILINEAR),
+        self.transform = Compose([
+            #Resize(resize, Image.BILINEAR),
             ToTensor(),
             Normalize(mean=mean, std=std),
         ])
@@ -52,13 +51,12 @@ class AddGaussianNoise(object):
 
 class CustomAugmentation:
     def __init__(self, resize, mean, std, **args):
-        self.transform = transforms.Compose([
-            CenterCrop((320, 256)),
+        self.transform = Compose([
+            CenterCrop((430, 300)),
             Resize(resize, Image.BILINEAR),
             ColorJitter(0.1, 0.1, 0.1, 0.1),
             ToTensor(),
-            Normalize(mean=mean, std=std),
-            AddGaussianNoise()
+            Normalize(mean=mean, std=std)
         ])
 
     def __call__(self, image):
@@ -114,9 +112,9 @@ class MaskBaseDataset(Dataset):
         "mask2": MaskLabels.MASK,
         "mask3": MaskLabels.MASK,
         "mask4": MaskLabels.MASK,
-        #"mask5": MaskLabels.MASK,
-        #"incorrect_mask": MaskLabels.INCORRECT,
-        #"normal": MaskLabels.NORMAL
+        "mask5": MaskLabels.MASK,
+        "incorrect_mask": MaskLabels.INCORRECT,
+        "normal": MaskLabels.NORMAL
     }
 
     image_paths = []
@@ -182,7 +180,6 @@ class MaskBaseDataset(Dataset):
         mask_label = self.get_mask_label(index)
         gender_label = self.get_gender_label(index)
         age_label = self.get_age_label(index)
-        mask_label = 0 # mask를 loss에서 제외시키기 위함
         multi_class_label = self.encode_multi_class(mask_label, gender_label, age_label)
 
         image_transform = self.transform(image)
@@ -298,7 +295,8 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
 class TestDataset(Dataset):
     def __init__(self, img_paths, resize, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
         self.img_paths = img_paths
-        self.transform = transforms.Compose([
+        self.transform = Compose([
+            CenterCrop((430, 300)),
             Resize(resize, Image.BILINEAR),
             ToTensor(),
             Normalize(mean=mean, std=std),
