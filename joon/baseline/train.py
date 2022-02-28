@@ -11,7 +11,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, CosineAnnealingLR, CosineAnnealingWarmRestarts
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
@@ -135,20 +135,20 @@ def train(data_dir, model_dir, args):
         num_classes=num_classes
     ).to(device)
     # 저장된 모델 불러와서 학습
-    #model_path = os.path.join(args.model_dir, 'onlymask_im', 'best.pth')
-    #model.load_state_dict(torch.load(model_path, map_location=device))
+    if args.reuse_param_exp != "None":
+        model_path = os.path.join(args.model_dir, args.reuse_param_exp, 'best.pth')
+        model.load_state_dict(torch.load(model_path, map_location=device))
     
 
     # pretrain된 데이터와 높은 유사성을 가질 때 사용하는 parameter freeze
-    '''if "Pre" in model.__class__.__name__:
+    if args.freeze == 'True':
         for name, para in model.named_parameters():
-            if "resnet18.fc" in name:
-                para.requires_grad = True
-            elif "resnet18.layer4" in name:
+            if args.unfreeze_param in name:
                 para.requires_grad = True
             else:
                 para.requires_grad = False
-    '''
+
+
     model = torch.nn.DataParallel(model)
 
     # -- loss & metric
@@ -157,9 +157,10 @@ def train(data_dir, model_dir, args):
     optimizer = opt_module(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.lr,
-        weight_decay=5e-4
+        weight_decay=1e-6
     )
-    scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
+    # scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
+    scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6, last_epoch=-1)
 
     # -- logging
     logger = SummaryWriter(log_dir=save_dir)
@@ -261,18 +262,22 @@ if __name__ == '__main__':
     parser.add_argument('--seed', type=int, default=42, help='random seed (default: 42)')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 20)')
     parser.add_argument('--dataset', type=str, default='MaskBaseDataset', help='dataset augmentation type (default: MaskBaseDataset)')
-    parser.add_argument('--augmentation', type=str, default='BaseAugmentation', help='data augmentation type (default: BaseAugmentation)')
-    parser.add_argument("--resize", nargs="+", type=list, default=[512, 384], help='resize size for image when training')
+    parser.add_argument('--augmentation', type=str, default='CustomAugmentation', help='data augmentation type (default: BaseAugmentation)')
+    parser.add_argument("--resize", nargs="+", type=list, default=[224, 224], help='resize size for image when training')
     parser.add_argument('--batch_size', type=int, default=64, help='input batch size for training (default: 64)')
     parser.add_argument('--valid_batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
-    parser.add_argument('--model', type=str, default='BaseModel', help='model type (default: BaseModel)')
+    parser.add_argument('--model', type=str, default='Preresnet18', help='model type (default: BaseModel)')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
-    parser.add_argument('--lr', type=float, default=1e-3, help='learning rate (default: 1e-3)')
+    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-3)')
     parser.add_argument('--val_ratio', type=float, default=0.2, help='ratio for validaton (default: 0.2)')
     parser.add_argument('--criterion', type=str, default='focal', help='criterion type (default: focal)')
     parser.add_argument('--lr_decay_step', type=int, default=20, help='learning rate scheduler deacy step (default: 20)')
+    parser.add_argument('--lr_scheduler', type=str, default='CosineAnnealingLR', help='learning rate scheduler')
     parser.add_argument('--log_interval', type=int, default=20, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
+    parser.add_argument('--reuse_param_exp', default='None', help='reuse parameters in ./model/exp_name')
+    parser.add_argument('--freeze', default='False', help='freeze backbone')
+    parser.add_argument('--unfreeze_param', type=str, default='None', help='unfreeze parameters')
 
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))

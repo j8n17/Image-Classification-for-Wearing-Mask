@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+import timm
 
 
 class BaseModel(nn.Module):
@@ -44,6 +45,7 @@ class Preresnet18(nn.Module):
     def forward(self, x):
         return self.resnet18(x)
 
+
 # Custom Model Template
 class MyModel(nn.Module):
     def __init__(self, num_classes):
@@ -61,3 +63,23 @@ class MyModel(nn.Module):
         2. 결과로 나온 output 을 return 해주세요
         """
         return x
+
+class SwinNet(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = timm.create_model('swin_small_patch4_window7_224', pretrained=False, num_classes=num_classes)
+        n_features = self.model.head.in_features
+        self.model.head = nn.Linear(n_features, num_classes, bias=True)
+
+    def forward(self, x):
+        return self.model(x)
+
+class ViT_base(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = timm.create_model('vit_base_patch16_224', pretrained=True)
+        self.model.head = nn.Linear(self.model.head.in_features, num_classes, bias=True)
+    
+    def forward(self, x):
+        return self.model(x)
+

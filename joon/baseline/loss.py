@@ -42,7 +42,7 @@ class LabelSmoothingLoss(nn.Module):
 
 # https://gist.github.com/SuperShinyEyes/dcc68a08ff8b615442e3bc6a9b55a354
 class F1Loss(nn.Module):
-    def __init__(self, classes=3, epsilon=1e-7):
+    def __init__(self, classes=18, epsilon=1e-7):
         super().__init__()
         self.classes = classes
         self.epsilon = epsilon
@@ -63,13 +63,43 @@ class F1Loss(nn.Module):
         f1 = 2 * (precision * recall) / (precision + recall + self.epsilon)
         f1 = f1.clamp(min=self.epsilon, max=1 - self.epsilon)
         return 1 - f1.mean()
+    
+class CE_F1(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, y_pred, y_true):
+        _f1 = F1Loss()
+        f1 = _f1(y_pred, y_true)
+        _ce = nn.CrossEntropyLoss()
+        ce = _ce(y_pred, y_true)
+        p = 0.4
+
+        return (p * f1) + (1 - p) * ce
+
+class FC_F1(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, y_pred, y_true):
+        _fc = FocalLoss()
+        fc = _fc(y_pred, y_true)
+        _ce = nn.CrossEntropyLoss()
+        ce = _ce(y_pred, y_true)
+        p = 0.4
+
+        return (p * fc) + (1 - p) * ce
+
 
 
 _criterion_entrypoints = {
     'cross_entropy': nn.CrossEntropyLoss,
     'focal': FocalLoss,
     'label_smoothing': LabelSmoothingLoss,
-    'f1': F1Loss
+    'f1': F1Loss,
+    'BCEWithLogitsLoss': nn.BCEWithLogitsLoss,
+    'CE_F1' : CE_F1,
+    'FC_F1' : FC_F1
 }
 
 
