@@ -9,8 +9,8 @@ from torch.utils.data import DataLoader
 from dataset import TestDataset, MaskLabelDataset
 
 
-def load_model(model_dir, saved_model, num_classes, device):
-    model_cls = getattr(import_module("model"), args.model)
+def load_model(model_dir, saved_model, num_classes, model_name, device):
+    model_cls = getattr(import_module("model"), model_name)
     model = model_cls(
         num_classes=num_classes
     )
@@ -35,10 +35,10 @@ def inference(data_dir, model_dir, output_dir, args):
 
     # num_classes = MaskLabelDataset.num_classes  # 18
     
-    mask_label_model = load_model(model_dir, args.mask_label_dir, 3, device).to(device)
-    mask_model = load_model(model_dir, args.mask_dir, 6, device).to(device)
-    normal_model = load_model(model_dir, args.normal_dir, 6, device).to(device)
-    incorrect_model = load_model(model_dir, args.incorrect_dir, 6, device).to(device)
+    mask_label_model = load_model(model_dir, args.mask_label_dir, 3, args.mask_label_model, device).to(device)
+    mask_model = load_model(model_dir, args.mask_dir, 6, args.mask_model, device).to(device)
+    normal_model = load_model(model_dir, args.normal_dir, 6, args.normal_model, device).to(device)
+    incorrect_model = load_model(model_dir, args.incorrect_dir, 6, args.incorrect_model, device).to(device)
     
     mask_label_model.eval()
     mask_model.eval()
@@ -86,7 +86,7 @@ def inference(data_dir, model_dir, output_dir, args):
             preds.extend(pred.cpu().numpy())
 
     info['ans'] = preds
-    info.to_csv(os.path.join(output_dir, f'output_f1.csv'), index=False)
+    info.to_csv(os.path.join(output_dir, f'output_googlenet.csv'), index=False)
     print(f'Inference Done!')
 
 
@@ -96,7 +96,7 @@ if __name__ == '__main__':
     # Data and model checkpoints directories
     parser.add_argument('--batch_size', type=int, default=1, help='input batch size for validing (default: 1000)') ########
     parser.add_argument('--resize', type=tuple, default=(96, 128), help='resize size for image when you trained (default: (96, 128))')
-    parser.add_argument('--model', type=str, default='MyModel', help='model type (default: BaseModel)')
+    parser.add_argument('--model', type=str, default='GoogLeNet', help='model type (default: BaseModel)')
 
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/eval'))
@@ -104,10 +104,15 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
 
     ################################# my args
-    parser.add_argument('--mask_label_dir', type=str, default='exp_mask_label_f1') # 마스크 착용 여부 모델 dir
-    parser.add_argument('--mask_dir', type=str, default='exp_mask_f1') # 마스크를 쓴 경우 성별, 나이 모델 dir
-    parser.add_argument('--normal_dir', type=str, default='exp_normal_f1') # 마스크를 쓴 경우 성별, 나이 모델 dir
-    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect_f1') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--mask_label_dir', type=str, default='exp_mask_label') # 마스크 착용 여부 모델 dir
+    parser.add_argument('--mask_dir', type=str, default='exp_mask_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--normal_dir', type=str, default='exp_normal_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
+
+    parser.add_argument('--mask_label_model', type=str, default='ResNet18')
+    parser.add_argument('--mask_model', type=str, default='GoogLeNet')
+    parser.add_argument('--normal_model', type=str, default='GoogLeNet')
+    parser.add_argument('--incorrect_model', type=str, default='GoogLeNet')
 
     args = parser.parse_args()
 

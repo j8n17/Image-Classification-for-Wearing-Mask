@@ -52,14 +52,25 @@ class AddGaussianNoise(object):
 
 
 class CustomAugmentation:
-    def __init__(self, resize, mean, std, **args):
+    def __init__(self, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246), gm=0, gs=1.0, **args):
         self.transform = transforms.Compose([
-            CenterCrop((320, 256)),
-            Resize(resize, Image.BILINEAR),
+            ToPILImage(),
+            # CenterCrop((384, 384)),
+            # Resize((224, 224)),
             ColorJitter(0.1, 0.1, 0.1, 0.1),
             ToTensor(),
-            Normalize(mean=mean, std=std),
-            AddGaussianNoise()
+            # Normalize(mean=mean, std=std),
+            AddGaussianNoise(mean=gm, std=gs)
+        ])
+
+    def __call__(self, image):
+        return self.transform(image)
+
+class ViTAugmentation:
+    def __init__(self, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246), **args):
+        self.transform = transforms.Compose([
+            CenterCrop((384, 384)),
+            Resize((224, 224)),
         ])
 
     def __call__(self, image):

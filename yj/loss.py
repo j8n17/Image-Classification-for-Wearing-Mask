@@ -64,12 +64,28 @@ class F1Loss(nn.Module):
         f1 = f1.clamp(min=self.epsilon, max=1 - self.epsilon)
         return 1 - f1.mean()
 
+#########################################
+class CE_F1(nn.Module):
+    def __init__(self, classes, P):
+        super().__init__()
+        self._classes = classes
+        self._P = P
+
+    def forward(self, y_pred, y_true):
+        _f1 = F1Loss(classes=self._classes)
+        f1 = _f1(y_pred, y_true)
+        _ce = nn.CrossEntropyLoss()
+        ce = _ce(y_pred, y_true)
+        p = self._P
+
+        return (p * f1) + (1 - p) * ce
 
 _criterion_entrypoints = {
     'cross_entropy': nn.CrossEntropyLoss,
     'focal': FocalLoss,
     'label_smoothing': LabelSmoothingLoss,
-    'f1': F1Loss
+    'f1': F1Loss,
+    'CE_F1' : CE_F1
 }
 
 

@@ -37,7 +37,7 @@ class BaseModel(nn.Module):
 
 
 # Custom Model Template
-class MyModel(nn.Module):
+class ResNet18(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
 
