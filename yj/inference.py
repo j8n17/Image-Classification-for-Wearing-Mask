@@ -86,7 +86,7 @@ def inference(data_dir, model_dir, output_dir, args):
             preds.extend(pred.cpu().numpy())
 
     info['ans'] = preds
-    info.to_csv(os.path.join(output_dir, f'output.csv'), index=False)
+    info.to_csv(os.path.join(output_dir, f'output_f1.csv'), index=False)
     print(f'Inference Done!')
 
 
@@ -94,7 +94,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # Data and model checkpoints directories
-    parser.add_argument('--batch_size', type=int, default=1, help='input batch size for validing (default: 1000)')
+    parser.add_argument('--batch_size', type=int, default=1, help='input batch size for validing (default: 1000)') ########
     parser.add_argument('--resize', type=tuple, default=(96, 128), help='resize size for image when you trained (default: (96, 128))')
     parser.add_argument('--model', type=str, default='MyModel', help='model type (default: BaseModel)')
 
@@ -104,10 +104,10 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
 
     ################################# my args
-    parser.add_argument('--mask_label_dir', type=str, default='exp_mask_label') # 마스크 착용 여부 모델 dir
-    parser.add_argument('--mask_dir', type=str, default='exp_mask') # 마스크를 쓴 경우 성별, 나이 모델 dir
-    parser.add_argument('--normal_dir', type=str, default='exp_normal') # 마스크를 쓴 경우 성별, 나이 모델 dir
-    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--mask_label_dir', type=str, default='exp_mask_label_f1') # 마스크 착용 여부 모델 dir
+    parser.add_argument('--mask_dir', type=str, default='exp_mask_f1') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--normal_dir', type=str, default='exp_normal_f1') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect_f1') # 마스크를 쓴 경우 성별, 나이 모델 dir
 
     args = parser.parse_args()
 
