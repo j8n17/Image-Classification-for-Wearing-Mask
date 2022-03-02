@@ -24,7 +24,8 @@ def is_image_file(filename):
 class BaseAugmentation:
     def __init__(self, resize, mean, std, **args):
         self.transform = transforms.Compose([
-            Resize(resize, Image.BILINEAR),
+            CenterCrop((320, 256)),
+            # Resize(resize, Image.BILINEAR),
             ToTensor(),
             Normalize(mean=mean, std=std),
         ])
@@ -54,7 +55,7 @@ class CustomAugmentation:
     def __init__(self, resize, mean, std, **args):
         self.transform = transforms.Compose([
             CenterCrop((320, 256)),
-            Resize(resize, Image.BILINEAR),
+            # Resize(resize, Image.BILINEAR),
             ColorJitter(0.1, 0.1, 0.1, 0.1),
             ToTensor(),
             Normalize(mean=mean, std=std),

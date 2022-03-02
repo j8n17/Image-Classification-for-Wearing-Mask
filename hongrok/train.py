@@ -82,6 +82,23 @@ def increment_path(path, exist_ok=False):
         n = max(i) + 1 if i else 2
         return f"{path}{n}"
 
+def rand_bbox(size, lam):
+    W = size[2]
+    H = size[3]
+    cut_rat = np.sqrt(1. - lam)
+    cut_w = np.int(W * cut_rat)
+    cut_h = np.int(H * cut_rat)
+
+    # uniform
+    cx = np.random.randint(W)
+    cy = np.random.randint(H)
+
+    bbx1 = np.clip(cx - cut_w // 2, 0, W)
+    bby1 = np.clip(cy - cut_h // 2, 0, H)
+    bbx2 = np.clip(cx + cut_w // 2, 0, W)
+    bby2 = np.clip(cy + cut_h // 2, 0, H)
+
+    return bbx1, bby1, bbx2, bby2
 
 def train(data_dir, model_dir, args):
     seed_everything(args.seed)
@@ -116,9 +133,6 @@ def train(data_dir, model_dir, args):
 
     # -- data_loader
     train_set, val_set = dataset.split_dataset()
-    
-    train_set.set_transform(transform)
-    val_set.set_transform(val_transform)
 
     train_loader = DataLoader(
         train_set,
@@ -164,23 +178,47 @@ def train(data_dir, model_dir, args):
     best_val_loss = np.inf
     for epoch in range(args.epochs):
         # train loop
+        dataset.set_transform(transform)
         model.train()
         loss_value = 0
         matches = 0
+        figure = None
         for idx, train_batch in enumerate(train_loader):
             inputs, labels = train_batch # labels 수정
             inputs = inputs.to(device)
             labels = labels.to(device)
 
             optimizer.zero_grad()
+            # cutmix
+            r = np.random.rand(1) 
+            if args.beta > 0 and r < args.cutmix_prob:
+                lam = np.random.beta(args.beta, args.beta)
+                rand_index = torch.randperm(inputs.size()[0]).cuda()
+                target_a = labels
+                target_b = labels[rand_index]
+                bbx1, bby1, bbx2, bby2 = rand_bbox(inputs.size(), lam)
+                inputs[:, :, bbx1:bbx2, bby1:bby2] = inputs[rand_index, :, bbx1:bbx2, bby1:bby2]
 
-            outs = model(inputs) # output 추가
-            preds = torch.argmax(outs, dim=-1) # ?
-            loss = criterion(outs, labels) # loss 추가
+                lam = 1 - ((bbx2 - bbx1) * (bby2 - bby1) / (inputs.size()[-1] * inputs.size()[-2]))
+                outs = model(inputs)
+                preds = torch.argmax(outs, dim=-1)
+                loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
+
+            else:
+                outs = model(inputs) # output 추가
+                preds = torch.argmax(outs, dim=-1) # ?
+                loss = criterion(outs, labels) # loss 추가
 
             loss.backward()
             optimizer.step()
-
+            
+            if figure is None: # 수정
+                inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
+                inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
+                figure = grid_image(
+                    inputs_np, labels, preds, n=16, shuffle=args.dataset != "MaskSplitByProfileDataset"
+                )
+            
             loss_value += loss.item()
             matches += (preds == labels).sum().item() # 수정
             if (idx + 1) % args.log_interval == 0:
@@ -193,7 +231,7 @@ def train(data_dir, model_dir, args):
                 )
                 logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
                 logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx) #수정
-
+                logger.add_figure("results", figure, epoch)
                 loss_value = 0
                 matches = 0 #수정
 
@@ -202,10 +240,11 @@ def train(data_dir, model_dir, args):
         # val loop
         with torch.no_grad():
             print("Calculating validation results...")
+            dataset.set_transform(val_transform)
             model.eval()
             val_loss_items = []
             val_acc_items = [] #수정
-            figure = None
+            # figure = None
             for val_batch in val_loader:
                 inputs, labels = val_batch #label 수정
                 inputs = inputs.to(device)
@@ -219,12 +258,12 @@ def train(data_dir, model_dir, args):
                 val_loss_items.append(loss_item)
                 val_acc_items.append(acc_item)#수정
 
-                if figure is None: # 수정
-                    inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
-                    inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
-                    figure = grid_image(
-                        inputs_np, labels, preds, n=16, shuffle=args.dataset != "MaskSplitByProfileDataset"
-                    )
+                # if figure is None: # 수정
+                #     inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
+                #     inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
+                #     figure = grid_image(
+                #         inputs_np, labels, preds, n=16, shuffle=args.dataset != "MaskSplitByProfileDataset"
+                #     )
 
             val_loss = np.sum(val_loss_items) / len(val_loader)
             val_acc = np.sum(val_acc_items) / len(val_set) #수정
@@ -240,7 +279,7 @@ def train(data_dir, model_dir, args):
             )#수정
             logger.add_scalar("Val/loss", val_loss, epoch)
             logger.add_scalar("Val/accuracy", val_acc, epoch)#수정
-            logger.add_figure("results", figure, epoch)
+            # logger.add_figure("results", figure, epoch)
             print()
 
 
@@ -256,9 +295,9 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 1)')
     parser.add_argument('--dataset', type=str, default='MaskSplitByProfileDataset', help='dataset augmentation type (default: MaskBaseDataset)')
     parser.add_argument('--augmentation', type=str, default='CustomAugmentation', help='data augmentation type (default: BaseAugmentation)')
-    parser.add_argument("--resize", nargs="+", type=list, default=[224, 224], help='resize size for image when training')
+    parser.add_argument("--resize", nargs="+", type=list, default=[160, 128], help='resize size for image when training')
     parser.add_argument('--batch_size', type=int, default=64, help='input batch size for training (default: 64)')
-    parser.add_argument('--valid_batch_size', type=int, default=1000, help='input batch size for validing (default: 1000)')
+    parser.add_argument('--valid_batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
     parser.add_argument('--model', type=str, default='MyModel', help='model type (default: BaseModel)')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: SGD)')
     parser.add_argument('--lr', type=float, default=1e-3, help='learning rate (default: 1e-3)')
@@ -271,6 +310,10 @@ if __name__ == '__main__':
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', '/opt/ml/exps/'))
+    
+    # cutmix
+    parser.add_argument('--beta', type=float, default=0)
+    parser.add_argument('--cutmix_prob', type=float, default=0.5)
 
     args = parser.parse_args()
     print(args)
