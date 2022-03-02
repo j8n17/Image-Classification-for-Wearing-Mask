@@ -65,30 +65,32 @@ class F1Loss(nn.Module):
         return 1 - f1.mean()
     
 class CE_F1(nn.Module):
-    def __init__(self):
+    def __init__(self, P):
         super().__init__()
+        self._P = P
 
     def forward(self, y_pred, y_true):
         _f1 = F1Loss()
         f1 = _f1(y_pred, y_true)
         _ce = nn.CrossEntropyLoss()
         ce = _ce(y_pred, y_true)
-        p = 0.4
+        p = self._P
 
         return (p * f1) + (1 - p) * ce
 
 class FC_F1(nn.Module):
-    def __init__(self):
+    def __init__(self, P):
         super().__init__()
+        self._P = P
 
     def forward(self, y_pred, y_true):
         _fc = FocalLoss()
         fc = _fc(y_pred, y_true)
-        _ce = nn.CrossEntropyLoss()
-        ce = _ce(y_pred, y_true)
-        p = 0.4
+        _f1 = F1Loss()
+        f1 = _f1(y_pred, y_true)
+        p = self._P
 
-        return (p * fc) + (1 - p) * ce
+        return (p * fc) + (1 - p) * f1
 
 
 

@@ -18,6 +18,10 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset import MaskBaseDataset
 from loss import create_criterion
 
+import nni
+from nni.utils import merge_parameter
+from optims import SGD_GC, SGDW, SGDW_GC, Adam_GC, AdamW, AdamW_GC
+from apex import amp
 
 def seed_everything(seed):
     torch.manual_seed(seed)
@@ -106,11 +110,18 @@ def train(data_dir, model_dir, args):
         mean=dataset.mean,
         std=dataset.std,
     )
-    dataset.set_transform(transform)
+    # val_loader는 augmentation하지 않음
+    val_transform_module = getattr(import_module("dataset"), "BaseAugmentation")  # default: BaseAugmentation
+    val_transform = val_transform_module(
+        resize=args.resize,
+        mean=dataset.mean,
+        std=dataset.std,
+    )
 
     # -- data_loader
     train_set, val_set = dataset.split_dataset()
 
+    dataset.set_transform(transform) # dataset transform (augmentation)
     train_loader = DataLoader(
         train_set,
         batch_size=args.batch_size,
@@ -141,7 +152,7 @@ def train(data_dir, model_dir, args):
     
 
     # pretrain된 데이터와 높은 유사성을 가질 때 사용하는 parameter freeze
-    if args.freeze == 'True':
+    if (args.unfreeze_param != "None") or (args.freeze == True):
         for name, para in model.named_parameters():
             if args.unfreeze_param in name:
                 para.requires_grad = True
@@ -149,16 +160,26 @@ def train(data_dir, model_dir, args):
                 para.requires_grad = False
 
 
-    model = torch.nn.DataParallel(model)
 
     # -- loss & metric
-    criterion = create_criterion(args.criterion)  # default: cross_entropy
-    opt_module = getattr(import_module("torch.optim"), args.optimizer)  # default: SGD
+    if args.p != 0:
+        criterion = create_criterion(args.criterion, P=args.p)
+    else:
+        criterion = create_criterion(args.criterion)
+
+
+    if args.optimizer == "Adam_GC":
+        opt_module = getattr(import_module("optims"), args.optimizer)
+    else:
+        opt_module = getattr(import_module("torch.optim"), args.optimizer)  # default: SGD
+    
     optimizer = opt_module(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.lr,
-        weight_decay=1e-6
+        weight_decay=5e-4
     )
+    model, optimizer = amp.initialize(model, optimizer, opt_level="O1") # amp
+    model = torch.nn.DataParallel(model)
     # scheduler = StepLR(optimizer, args.lr_decay_step, gamma=0.5)
     scheduler = CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6, last_epoch=-1)
 
@@ -184,8 +205,10 @@ def train(data_dir, model_dir, args):
             outs = model(inputs)
             preds = torch.argmax(outs, dim=-1)
             loss = criterion(outs, labels)
-
-            loss.backward()
+            # amp_scaled_loss
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
+            #loss.backward()
             optimizer.step()
 
             loss_value += loss.item()
@@ -213,6 +236,7 @@ def train(data_dir, model_dir, args):
             val_loss_items = []
             val_acc_items = []
             figure = None
+            dataset.set_transform(val_transform) # val dataset은 augmentation 하지 않음
             for val_batch in val_loader:
                 inputs, labels = val_batch
                 inputs = inputs.to(device)
@@ -249,6 +273,8 @@ def train(data_dir, model_dir, args):
             logger.add_scalar("Val/accuracy", val_acc, epoch)
             logger.add_figure("results", figure, epoch)
             print()
+        nni.report_intermediate_result(val_acc)
+    nni.report_final_result(val_acc)
 
 
 if __name__ == '__main__':
@@ -263,18 +289,21 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 20)')
     parser.add_argument('--dataset', type=str, default='MaskBaseDataset', help='dataset augmentation type (default: MaskBaseDataset)')
     parser.add_argument('--augmentation', type=str, default='CustomAugmentation', help='data augmentation type (default: BaseAugmentation)')
-    parser.add_argument("--resize", nargs="+", type=list, default=[224, 224], help='resize size for image when training')
+    parser.add_argument("--resize", nargs="+", type=int, default=[224, 224], help='resize size for image when training')
     parser.add_argument('--batch_size', type=int, default=64, help='input batch size for training (default: 64)')
     parser.add_argument('--valid_batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
     parser.add_argument('--model', type=str, default='Preresnet18', help='model type (default: BaseModel)')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
-    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-3)')
+    parser.add_argument('--lr', type=float, default=1e-3, help='learning rate (default: 1e-3)')
     parser.add_argument('--val_ratio', type=float, default=0.2, help='ratio for validaton (default: 0.2)')
     parser.add_argument('--criterion', type=str, default='focal', help='criterion type (default: focal)')
     parser.add_argument('--lr_decay_step', type=int, default=20, help='learning rate scheduler deacy step (default: 20)')
     parser.add_argument('--lr_scheduler', type=str, default='CosineAnnealingLR', help='learning rate scheduler')
     parser.add_argument('--log_interval', type=int, default=20, help='how many batches to wait before logging training status')
     parser.add_argument('--name', default='exp', help='model save at {SM_MODEL_DIR}/{name}')
+
+    # joon's args
+    parser.add_argument('--p', type=float, default=0.0, help='criterion sum ratio')
     parser.add_argument('--reuse_param_exp', default='None', help='reuse parameters in ./model/exp_name')
     parser.add_argument('--freeze', default='False', help='freeze backbone')
     parser.add_argument('--unfreeze_param', type=str, default='None', help='unfreeze parameters')
@@ -284,6 +313,9 @@ if __name__ == '__main__':
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR', './model'))
 
     args = parser.parse_args()
+    tuner_params = nni.get_next_parameter()
+    args = merge_parameter(args, tuner_params)
+
     print(args)
 
     data_dir = args.data_dir
