@@ -20,11 +20,12 @@ IMG_EXTENSIONS = [
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
 
+########################################## Augmentation ##########################################
 
 class BaseAugmentation:
     def __init__(self, resize, mean, std, **args):
         self.transform = transforms.Compose([
-            Resize(resize, Image.BILINEAR),
+            # Resize(resize, Image.BILINEAR),
             ToTensor(),
             Normalize(mean=mean, std=std),
         ])
@@ -64,14 +65,15 @@ class CustomAugmentation:
     def __call__(self, image):
         return self.transform(image)
 
+########################################## Labeling ##########################################
 
-class MaskLabels(int, Enum):
+class MaskLabels(int, Enum):                                    # mask label
     MASK = 0
     INCORRECT = 1
     NORMAL = 2
 
 
-class GenderLabels(int, Enum):
+class GenderLabels(int, Enum):                                  # gender label을 str -> int
     MALE = 0
     FEMALE = 1
 
@@ -86,7 +88,7 @@ class GenderLabels(int, Enum):
             raise ValueError(f"Gender value should be either 'male' or 'female', {value}")
 
 
-class AgeLabels(int, Enum):
+class AgeLabels(int, Enum):                                     # age를 카테고리화
     YOUNG = 0
     MIDDLE = 1
     OLD = 2
@@ -105,9 +107,10 @@ class AgeLabels(int, Enum):
         else:
             return cls.OLD
 
+########################################## Dataset ##########################################
 
-class MaskBaseDataset(Dataset):
-    num_classes = 3 * 2 * 3
+class MaskBaseDataset(Dataset):                                 ####################################### 기본 dataset
+    # num_classes = 3 * 2 * 3
 
     _file_names = {
         "mask1": MaskLabels.MASK,
@@ -124,6 +127,7 @@ class MaskBaseDataset(Dataset):
     gender_labels = []
     age_labels = []
 
+    # mean과 std는 RGB이므로 각각 3개
     def __init__(self, data_dir, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246), val_ratio=0.2):
         self.data_dir = data_dir
         self.mean = mean
@@ -136,20 +140,21 @@ class MaskBaseDataset(Dataset):
 
     def setup(self):
         profiles = os.listdir(self.data_dir)
-        for profile in profiles:
-            if profile.startswith("."):  # "." 로 시작하는 파일은 무시합니다
+        for profile in profiles:                # 이미지 폴더들 (사람별)
+            if profile.startswith("."):         # "." 로 시작하는 파일은 무시합니다
                 continue
 
-            img_folder = os.path.join(self.data_dir, profile)
-            for file_name in os.listdir(img_folder):
+            img_folder = os.path.join(self.data_dir, profile)   
+            for file_name in os.listdir(img_folder):            # 이미지들 (mask, normal 등)
                 _file_name, ext = os.path.splitext(file_name)
-                if _file_name not in self._file_names:  # "." 로 시작하는 파일 및 invalid 한 파일들은 무시합니다
+                if _file_name not in self._file_names:          # "." 로 시작하는 파일 및 invalid 한 파일들은 무시합니다
                     continue
 
                 img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
-                mask_label = self._file_names[_file_name]
+                mask_label = self._file_names[_file_name]                   # mask label = 파일 이름.
 
                 id, gender, race, age = profile.split("_")
+                # gender와 age label
                 gender_label = GenderLabels.from_str(gender)
                 age_label = AgeLabels.from_number(age)
 
@@ -216,6 +221,9 @@ class MaskBaseDataset(Dataset):
 
     @staticmethod
     def denormalize_image(image, mean, std):
+        """
+        normalization 된 이미지를 다시 복원.
+        """
         img_cp = image.copy()
         img_cp *= std
         img_cp += mean
@@ -230,9 +238,9 @@ class MaskBaseDataset(Dataset):
         torch.utils.data.Subset 클래스 둘로 나눕니다.
         구현이 어렵지 않으니 구글링 혹은 IDE (e.g. pycharm) 의 navigation 기능을 통해 코드를 한 번 읽어보는 것을 추천드립니다^^
         """
-        n_val = int(len(self) * self.val_ratio)
-        n_train = len(self) - n_val
-        train_set, val_set = random_split(self, [n_train, n_val])
+        n_val = int(len(self) * self.val_ratio)                     # 전체에서 validation data의 비율.
+        n_train = len(self) - n_val                                 
+        train_set, val_set = random_split(self, [n_train, n_val])   # train data와 validation data로 나눔. (중복 없음)
         return train_set, val_set
 
 
@@ -242,6 +250,10 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
         사람(profile)을 기준으로 나눕니다.
         구현은 val_ratio 에 맞게 train / val 나누는 것을 이미지 전체가 아닌 사람(profile)에 대해서 진행하여 indexing 을 합니다
         이후 `split_dataset` 에서 index 에 맞게 Subset 으로 dataset 을 분기합니다.
+
+        MaskBaseDataset은 사람에 상관 없이 전체 이미지를 비율로 나누어서 train와 val에 같은 사람이 들어갈 수 있었다.
+        여기서는 개인을 기준으로 train과 val data를 비율대로 나눔.
+        즉, 같은 사람이 동시에 들어가는 일이 없다. 
     """
 
     def __init__(self, data_dir, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246), val_ratio=0.2):
@@ -254,7 +266,7 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
         n_val = int(length * val_ratio)
 
         val_indices = set(random.choices(range(length), k=n_val))
-        train_indices = set(range(length)) - val_indices
+        train_indices = set(range(length)) - val_indices            # 차집합
         return {
             "train": train_indices,
             "val": val_indices
@@ -266,13 +278,13 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
         split_profiles = self._split_profile(profiles, self.val_ratio)
 
         cnt = 0
-        for phase, indices in split_profiles.items():
+        for phase, indices in split_profiles.items():               # phase: train, val
             for _idx in indices:
-                profile = profiles[_idx]
+                profile = profiles[_idx]                            # 특정 사람의
                 img_folder = os.path.join(self.data_dir, profile)
-                for file_name in os.listdir(img_folder):
+                for file_name in os.listdir(img_folder):            # 각각의 사진들
                     _file_name, ext = os.path.splitext(file_name)
-                    if _file_name not in self._file_names:  # "." 로 시작하는 파일 및 invalid 한 파일들은 무시합니다
+                    if _file_name not in self._file_names:          # "." 로 시작하는 파일 및 invalid 한 파일들은 무시합니다
                         continue
 
                     img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
@@ -293,12 +305,155 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
     def split_dataset(self) -> List[Subset]:
         return [Subset(self, indices) for phase, indices in self.indices.items()]
 
+########################################## Custom Dataset ##########################################
+
+class MaskLabelDataset(MaskBaseDataset):
+    """
+        원하는 mask label로 데이터 분류.
+        label은 gender, age 뿐. 
+    """
+    num_classes = 2 * 3         # gender * age
+
+    _mask_labels = {
+        "mask": MaskLabels.MASK,
+        "incorrect_mask": MaskLabels.INCORRECT,
+        "normal": MaskLabels.NORMAL
+    }
+
+    def __init__(self, data_dir, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246), val_ratio=0.2,
+                    mask_label='mask'):
+        self.indices = defaultdict(list)
+        self.mask_label = mask_label
+        super().__init__(data_dir, mean, std, val_ratio)
+
+    @staticmethod
+    def _split_profile(profiles, val_ratio):
+        length = len(profiles)
+        n_val = int(length * val_ratio)
+
+        val_indices = set(random.choices(range(length), k=n_val))
+        train_indices = set(range(length)) - val_indices            # 차집합
+        return {
+            "train": train_indices,
+            "val": val_indices
+        }
+
+    def setup(self):
+        profiles = os.listdir(self.data_dir)
+        profiles = [profile for profile in profiles if not profile.startswith(".")]
+        split_profiles = self._split_profile(profiles, self.val_ratio)
+
+        cnt = 0
+        for phase, indices in split_profiles.items():               # phase: train, val
+            for _idx in indices:
+                profile = profiles[_idx]                            # 특정 사람의
+                img_folder = os.path.join(self.data_dir, profile)
+                for file_name in os.listdir(img_folder):            # 각각의 사진들
+                    _file_name, ext = os.path.splitext(file_name)
+                    if not _file_name.startswith(self.mask_label):  # 원하는 mask label의 데이터만
+                        continue
+
+                    img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
+                    mask_label = self._mask_labels[self.mask_label]
+
+                    id, gender, race, age = profile.split("_")
+                    gender_label = GenderLabels.from_str(gender)
+                    age_label = AgeLabels.from_number(age)
+
+                    self.image_paths.append(img_path)
+                    self.mask_labels.append(mask_label)
+                    self.gender_labels.append(gender_label)
+                    self.age_labels.append(age_label)
+
+                    self.indices[phase].append(cnt)
+                    cnt += 1
+
+    def __getitem__(self, index):
+        assert self.transform is not None, ".set_tranform 메소드를 이용하여 transform 을 주입해주세요"
+
+        image = self.read_image(index)
+        mask_label = self._mask_labels[self.mask_label]
+        gender_label = self.get_gender_label(index)
+        age_label = self.get_age_label(index)
+        # multi_class_label = self.encode_multi_class(mask_label, gender_label, age_label)
+        # cross entropy는 클래스 넘버가 무조건 0부터 시작해야함.
+        # encoder를 그대로 사용하면 Assertion `t >= 0 && t < n_classes` failed 에러가 뜸.
+        multi_class_label = gender_label * 3 + age_label
+
+        image_transform = self.transform(image)
+        return image_transform, multi_class_label
+
+    def split_dataset(self) -> List[Subset]:
+        temp = [Subset(self, indices) for phase, indices in self.indices.items()]
+        # print(temp)
+        return temp
+
+class MaskDataset(MaskBaseDataset):
+    """
+        mask 착용 여부만 분류하도록 하는 dataset 
+    """
+
+    num_classes = 3     # mask, normal, incorrect_mask
+
+    def __init__(self, data_dir, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246), val_ratio=0.2):
+        self.indices = defaultdict(list)
+        super().__init__(data_dir, mean, std, val_ratio)
+
+    @staticmethod
+    def _split_profile(profiles, val_ratio):
+        length = len(profiles)
+        n_val = int(length * val_ratio)
+
+        val_indices = set(random.choices(range(length), k=n_val))
+        train_indices = set(range(length)) - val_indices            # 차집합
+        return {
+            "train": train_indices,
+            "val": val_indices
+        }
+
+    def setup(self):
+        profiles = os.listdir(self.data_dir)
+        profiles = [profile for profile in profiles if not profile.startswith(".")]
+        split_profiles = self._split_profile(profiles, self.val_ratio)
+
+        cnt = 0
+        for phase, indices in split_profiles.items():               # phase: train, val
+            for _idx in indices:
+                profile = profiles[_idx]                            # 특정 사람의
+                img_folder = os.path.join(self.data_dir, profile)
+                for file_name in os.listdir(img_folder):            # 각각의 사진들
+                    _file_name, ext = os.path.splitext(file_name)
+                    if _file_name not in self._file_names:          # "." 로 시작하는 파일 및 invalid 한 파일들은 무시합니다
+                        continue
+
+                    img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
+                    mask_label = self._file_names[_file_name]
+
+                    self.image_paths.append(img_path)
+                    self.mask_labels.append(mask_label)
+
+                    self.indices[phase].append(cnt)
+                    cnt += 1
+
+    def split_dataset(self) -> List[Subset]:
+        return [Subset(self, indices) for phase, indices in self.indices.items()]
+
+    def __getitem__(self, index):
+        assert self.transform is not None, ".set_tranform 메소드를 이용하여 transform 을 주입해주세요"
+
+        image = self.read_image(index)
+        mask_label = self.get_mask_label(index)
+
+        image_transform = self.transform(image)
+        return image_transform, mask_label
+
+########################################## Test Dataset ##########################################
 
 class TestDataset(Dataset):
     def __init__(self, img_paths, resize, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
         self.img_paths = img_paths
         self.transform = transforms.Compose([
-            Resize(resize, Image.BILINEAR),
+            # Resize(resize, Image.BILINEAR),
             ToTensor(),
             Normalize(mean=mean, std=std),
         ])

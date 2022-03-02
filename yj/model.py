@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import timm 
 
 
 class BaseModel(nn.Module):
@@ -44,10 +45,17 @@ class MyModel(nn.Module):
         2. 나만의 모델 아키텍쳐를 디자인 해봅니다.
         3. 모델의 output_dimension 은 num_classes 로 설정해주세요.
         """
+        self.num_classes = num_classes
+        self.model = timm.create_model('resnet18', pretrained=True, num_classes=self.num_classes)
+        # freeze
+        for name, param in self.model.named_parameters():
+            if not name.startswith('fc'):
+                param.requires_grad = False
+        
 
     def forward(self, x):
         """
         1. 위에서 정의한 모델 아키텍쳐를 forward propagation 을 진행해주세요
         2. 결과로 나온 output 을 return 해주세요
         """
-        return x
+        return self.model(x)

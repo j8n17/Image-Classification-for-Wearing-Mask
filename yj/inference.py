@@ -6,10 +6,10 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import TestDataset, MaskBaseDataset
+from dataset import TestDataset, MaskLabelDataset
 
 
-def load_model(saved_model, num_classes, device):
+def load_model(model_dir, saved_model, num_classes, device):
     model_cls = getattr(import_module("model"), args.model)
     model = model_cls(
         num_classes=num_classes
@@ -19,7 +19,8 @@ def load_model(saved_model, num_classes, device):
     # tar = tarfile.open(tarpath, 'r:gz')
     # tar.extractall(path=saved_model)
 
-    model_path = os.path.join(saved_model, 'best.pth')
+    model_path = os.path.join(model_dir, saved_model)
+    model_path = os.path.join(model_path, 'best.pth')
     model.load_state_dict(torch.load(model_path, map_location=device))
 
     return model
@@ -32,9 +33,17 @@ def inference(data_dir, model_dir, output_dir, args):
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    num_classes = MaskBaseDataset.num_classes  # 18
-    model = load_model(model_dir, num_classes, device).to(device)
-    model.eval()
+    # num_classes = MaskLabelDataset.num_classes  # 18
+    
+    mask_label_model = load_model(model_dir, args.mask_label_dir, 3, device).to(device)
+    mask_model = load_model(model_dir, args.mask_dir, 6, device).to(device)
+    normal_model = load_model(model_dir, args.normal_dir, 6, device).to(device)
+    incorrect_model = load_model(model_dir, args.incorrect_dir, 6, device).to(device)
+    
+    mask_label_model.eval()
+    mask_model.eval()
+    normal_model.eval()
+    incorrect_model.eval()
 
     img_root = os.path.join(data_dir, 'images')
     info_path = os.path.join(data_dir, 'info.csv')
@@ -56,8 +65,24 @@ def inference(data_dir, model_dir, output_dir, args):
     with torch.no_grad():
         for idx, images in enumerate(loader):
             images = images.to(device)
-            pred = model(images)
-            pred = pred.argmax(dim=-1)
+            
+            # 마스크 착용 여부 예측
+            mask_label_pred = mask_label_model(images)
+            mask_label_pred = mask_label_pred.argmax(dim=-1)
+            # print(pred)
+
+            # 마스크 착용 여부에 따라 다른 모델 적용
+            if mask_label_pred[0] == 0:
+                gender_age_pred = mask_model(images)
+                gender_age_pred = gender_age_pred.argmax(dim=-1)
+            elif mask_label_pred[0] == 1:
+                gender_age_pred = incorrect_model(images)
+                gender_age_pred = gender_age_pred.argmax(dim=-1)
+            else:
+                gender_age_pred = normal_model(images)
+                gender_age_pred = gender_age_pred.argmax(dim=-1)
+
+            pred = mask_label_pred * 6 + gender_age_pred
             preds.extend(pred.cpu().numpy())
 
     info['ans'] = preds
@@ -69,14 +94,20 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # Data and model checkpoints directories
-    parser.add_argument('--batch_size', type=int, default=1000, help='input batch size for validing (default: 1000)')
+    parser.add_argument('--batch_size', type=int, default=1, help='input batch size for validing (default: 1000)')
     parser.add_argument('--resize', type=tuple, default=(96, 128), help='resize size for image when you trained (default: (96, 128))')
-    parser.add_argument('--model', type=str, default='BaseModel', help='model type (default: BaseModel)')
+    parser.add_argument('--model', type=str, default='MyModel', help='model type (default: BaseModel)')
 
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/eval'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_CHANNEL_MODEL', './model'))
     parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
+
+    ################################# my args
+    parser.add_argument('--mask_label_dir', type=str, default='exp_mask_label') # 마스크 착용 여부 모델 dir
+    parser.add_argument('--mask_dir', type=str, default='exp_mask') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--normal_dir', type=str, default='exp_normal') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect') # 마스크를 쓴 경우 성별, 나이 모델 dir
 
     args = parser.parse_args()
 
