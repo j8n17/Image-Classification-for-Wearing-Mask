@@ -100,3 +100,13 @@ class ViT(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+
+class ResNet26(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.num_classes = num_classes
+        self.model = timm.create_model('resnet26', pretrained=True, num_classes=self.num_classes)
+
+    def forward(self, x):
+        return self.model(x)
