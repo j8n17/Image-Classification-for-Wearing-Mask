@@ -50,7 +50,7 @@ def inference(data_dir, model_dir, output_dir, args):
     info = pd.read_csv(info_path)
 
     img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
-    dataset = TestDataset(img_paths, args.resize)
+    dataset = TestDataset(img_paths)
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -86,7 +86,7 @@ def inference(data_dir, model_dir, output_dir, args):
             preds.extend(pred.cpu().numpy())
 
     info['ans'] = preds
-    info.to_csv(os.path.join(output_dir, f'output_googlenet_onlycrop.csv'), index=False)
+    info.to_csv(os.path.join(output_dir, f'output_googlenet.csv'), index=False)
     print(f'Inference Done!')
 
 
@@ -105,9 +105,9 @@ if __name__ == '__main__':
 
     ################################# my args
     parser.add_argument('--mask_label_dir', type=str, default='exp_mask_label') # 마스크 착용 여부 모델 dir
-    parser.add_argument('--mask_dir', type=str, default='exp_mask_googlenet_onlycrop') # 마스크를 쓴 경우 성별, 나이 모델 dir
-    parser.add_argument('--normal_dir', type=str, default='exp_normal_googlenet_onlycrop') # 마스크를 쓴 경우 성별, 나이 모델 dir
-    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect_googlenet_onlycrop') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--mask_dir', type=str, default='exp_mask_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--normal_dir', type=str, default='exp_normal_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
 
     parser.add_argument('--mask_label_model', type=str, default='ResNet18')
     parser.add_argument('--mask_model', type=str, default='GoogLeNet')

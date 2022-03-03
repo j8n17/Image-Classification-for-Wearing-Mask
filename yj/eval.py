@@ -5,6 +5,8 @@ from importlib import import_module
 import pandas as pd
 import torch
 from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchvision.transforms import *
 
 from dataset import EvalDataset, MaskLabelDataset
 
@@ -67,8 +69,16 @@ def eval(data_dir, model_dir, output_dir, args):
     preds = []
     labels = []
     with torch.no_grad():
+        # TTA_transform = transforms.Compose([
+        #     ToPILImage(),
+        #     CenterCrop((384, 384)),
+        #     ToTensor(),
+        # ])
         for images, label in loader:
+            # TTA_image = TTA_transform(images[0])
+            # TTA_image = TTA_image.unsqueeze(dim=0)
             images = images.to(device)
+            # TTA_image = TTA_image.to(device)
             labels.append(label[0])
             
             # 마스크 착용 여부 예측
@@ -79,13 +89,16 @@ def eval(data_dir, model_dir, output_dir, args):
             # 마스크 착용 여부에 따라 다른 모델 적용
             if mask_label_pred[0] == 0:
                 gender_age_pred = mask_model(images)
-                gender_age_pred = gender_age_pred.argmax(dim=-1)
+                # TTA_pred = mask_model(TTA_image)
             elif mask_label_pred[0] == 1:
                 gender_age_pred = incorrect_model(images)
-                gender_age_pred = gender_age_pred.argmax(dim=-1)
+                # TTA_pred = incorrect_model(TTA_image)
             else:
                 gender_age_pred = normal_model(images)
-                gender_age_pred = gender_age_pred.argmax(dim=-1)
+                # TTA_pred = normal_model(TTA_image)
+            
+            # gender_age_pred = gender_age_pred + TTA_pred
+            gender_age_pred = gender_age_pred.argmax(dim=-1)
 
             pred = mask_label_pred * 6 + gender_age_pred
             # preds.extend(pred.cpu().numpy())
@@ -98,6 +111,9 @@ def eval(data_dir, model_dir, output_dir, args):
     # info.to_csv(os.path.join(output_dir, f'output_googlenet.csv'), index=False)
     print(f'Evaluation Done! accuracy : {acc:4.2%}')
 
+    for i in range(len(labels)):
+        if labels[i] != preds[i]:
+            print(f'label : {labels[i]}, pred : {preds[i]}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -115,9 +131,9 @@ if __name__ == '__main__':
 
     ################################# my args
     parser.add_argument('--mask_label_dir', type=str, default='exp_mask_label') # 마스크 착용 여부 모델 dir
-    parser.add_argument('--mask_dir', type=str, default='exp_mask_googlenet_onlycrop') # 마스크를 쓴 경우 성별, 나이 모델 dir
-    parser.add_argument('--normal_dir', type=str, default='exp_normal_googlenet_onlycrop') # 마스크를 쓴 경우 성별, 나이 모델 dir
-    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect_googlenet_onlycrop') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--mask_dir', type=str, default='exp_mask_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--normal_dir', type=str, default='exp_normal_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
+    parser.add_argument('--incorrect_dir', type=str, default='exp_incorrect_googlenet') # 마스크를 쓴 경우 성별, 나이 모델 dir
 
     parser.add_argument('--mask_label_model', type=str, default='ResNet18')
     parser.add_argument('--mask_model', type=str, default='GoogLeNet')

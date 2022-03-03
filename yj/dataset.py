@@ -68,6 +68,7 @@ class CropAugmentation:
         self.transform = transforms.Compose([
             CenterCrop((384, 384)),
             ToTensor(),
+            Normalize(mean=mean, std=std)
         ])
 
     def __call__(self, image):
@@ -475,10 +476,13 @@ class TestDataset(Dataset):
         self.transform = transforms.Compose([
             CenterCrop((384, 384)),
             ToTensor(),
+            Normalize(mean=mean, std=std)
         ])
 
     def __getitem__(self, index):
         image = Image.open(self.img_paths[index])
+        # print(self.img_paths[index])
+        # print(ToTensor()(CenterCrop((384, 384))(image)).shape)
 
         if self.transform:
             image = self.transform(image)
@@ -550,6 +554,78 @@ class EvalDataset(Dataset):
         gender_label = self.gender_labels[index]
         age_label = self.age_labels[index]
         multi_class_label = mask_label * 6 + gender_label * 3 + age_label
+
+        if self.transform:
+            image = self.transform(image)
+        return image, multi_class_label
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def set_transform(self, transform):
+        self.transform = transform
+
+
+class ModelEvalDataset(Dataset):
+    _file_names = {
+        "mask1": MaskLabels.MASK,
+        "mask2": MaskLabels.MASK,
+        "mask3": MaskLabels.MASK,
+        "mask4": MaskLabels.MASK,
+        "mask5": MaskLabels.MASK,
+        "incorrect_mask": MaskLabels.INCORRECT,
+        "normal": MaskLabels.NORMAL
+    }
+    
+    image_paths = []
+    mask_labels = []
+    gender_labels = []
+    age_labels = []
+
+    def __init__(self, data_dir, label, ratio, mean=(0.548, 0.504, 0.479), std=(0.237, 0.247, 0.246)):
+        self.data_dir = data_dir
+        self.mean = mean
+        self.std = std
+        self.transform = None
+        self.label = label
+
+        self.data_ratio = ratio
+
+        self.setup()
+
+    def setup(self):
+        profiles = os.listdir(self.data_dir)
+        for profile in profiles:                # 이미지 폴더들 (사람별)
+            if profile.startswith("."):         # "." 로 시작하는 파일은 무시합니다
+                continue
+
+            img_folder = os.path.join(self.data_dir, profile)   
+            for file_name in os.listdir(img_folder):            # 이미지들 (mask, normal 등)
+                _file_name, ext = os.path.splitext(file_name)
+                if not _file_name.startswith(self.label):          
+                    continue
+
+                is_in = random.choices([True, False], weights=[self.data_ratio, 1 - self.data_ratio])
+
+                if not is_in:
+                    continue
+
+                img_path = os.path.join(self.data_dir, profile, file_name)  # (resized_data, 000004_male_Asian_54, mask1.jpg)
+
+                id, gender, race, age = profile.split("_")
+                # gender와 age label
+                gender_label = GenderLabels.from_str(gender)
+                age_label = AgeLabels.from_number(age)
+
+                self.image_paths.append(img_path)
+                self.gender_labels.append(gender_label)
+                self.age_labels.append(age_label)
+
+    def __getitem__(self, index):
+        image = Image.open(self.image_paths[index])
+        gender_label = self.gender_labels[index]
+        age_label = self.age_labels[index]
+        multi_class_label = gender_label * 3 + age_label
 
         if self.transform:
             image = self.transform(image)
