@@ -15,14 +15,15 @@ experimentName: criterion summation ratio           # An optional name to help y
   #   _type: choice
   #   _value: [Preresnet18, ViT_base]
 searchSpace:
-  criterion:
+  seed:
     _type: choice
-    _value: [CE_F1, FC_F1]
+    _value: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   p:
     _type: uniform
     _value: [0, 1]
+  
 
-trialCommand: python3 train.py --epochs 20 --batch_size 256 --model Preresnet18 --dataset MaskSplitByProfileDataset # The command to launch a trial. NOTE: change "python3" to "python" if you are using Windows.
+trialCommand: python3 train.py --epochs 10 --batch_size 128 --model Preresnet50 --dataset MaskSplitByProfileDataset --criterion CE_F1 --data_dir /opt/ml/real_input/images_sampling3_more_incor --mix_up True --f1_acc True # The command to launch a trial. NOTE: change "python3" to "python" if you are using Windows.
 trialCodeDirectory: ..           # The path of trial code. By default it's ".", which means the same directory of this config file.
 trialGpuNumber: 1               # How many GPUs should each trial use. CUDA is required when it's greater than zero.
 

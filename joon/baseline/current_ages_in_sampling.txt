@@ -1,0 +1,11 @@
+less than 30 : 1283 
+	 female : 733 
+	 male : 550 
+
+more than 30 and less than 60 : 1224 
+	 female : 811 
+	 male : 413 
+
+60 years old : 386 
+	 female : 218 
+	 male : 168 

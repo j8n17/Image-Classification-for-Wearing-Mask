@@ -119,9 +119,8 @@ def train(data_dir, model_dir, args):
     )
 
     # -- data_loader
-    train_set, val_set = dataset.split_dataset()
+    train_set, val_set, test_set = dataset.split_dataset()
 
-    dataset.set_transform(transform) # dataset transform (augmentation)
     train_loader = DataLoader(
         train_set,
         batch_size=args.batch_size,
@@ -134,6 +133,15 @@ def train(data_dir, model_dir, args):
     val_loader = DataLoader(
         val_set,
         batch_size=args.valid_batch_size,
+        num_workers=multiprocessing.cpu_count()//2,
+        shuffle=True,
+        pin_memory=use_cuda,
+        drop_last=False,
+    )
+
+    test_loader = DataLoader(
+        test_set,
+        batch_size=64,
         num_workers=multiprocessing.cpu_count()//2,
         shuffle=False,
         pin_memory=use_cuda,
@@ -176,7 +184,7 @@ def train(data_dir, model_dir, args):
     optimizer = opt_module(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.lr,
-        weight_decay=5e-4
+        weight_decay=5e-5
     )
     model, optimizer = amp.initialize(model, optimizer, opt_level="O1") # amp
     model = torch.nn.DataParallel(model)
@@ -189,22 +197,37 @@ def train(data_dir, model_dir, args):
         json.dump(vars(args), f, ensure_ascii=False, indent=4)
 
     best_val_acc = 0
+    best_f1_score = 0
     best_val_loss = np.inf
     for epoch in range(args.epochs):
         # train loop
         model.train()
         loss_value = 0
         matches = 0
+        dataset.set_transform(transform) # dataset transform (augmentation)
         for idx, train_batch in enumerate(train_loader):
             inputs, labels = train_batch
             inputs = inputs.to(device)
             labels = labels.to(device)
 
+            # mix_up
+            if args.mix_up:
+                lam = np.random.beta(1.0, 1.0)
+                index = torch.randperm(args.batch_size).to(device)
+                inputs = lam * inputs + (1 - lam) * inputs[index]
+                labels_a, labels_b = labels, labels[index]
+
             optimizer.zero_grad()
 
             outs = model(inputs)
             preds = torch.argmax(outs, dim=-1)
-            loss = criterion(outs, labels)
+            if args.mix_up:
+                def MixUp(criterion, outs, labels_a, labels_b, lam):
+                    return lam * criterion(outs, labels_a) + (1 - lam) * criterion(outs, labels_b)
+                loss = MixUp(criterion, outs, labels_a, labels_b, lam)
+            else:
+                loss = criterion(outs, labels)
+
             # amp_scaled_loss
             with amp.scale_loss(loss, optimizer) as scaled_loss:
                 scaled_loss.backward()
@@ -235,6 +258,9 @@ def train(data_dir, model_dir, args):
             model.eval()
             val_loss_items = []
             val_acc_items = []
+            f1_items = []
+            test_acc_items = []
+            test_f1_items = []
             figure = None
             dataset.set_transform(val_transform) # val dataset은 augmentation 하지 않음
             for val_batch in val_loader:
@@ -246,9 +272,15 @@ def train(data_dir, model_dir, args):
                 preds = torch.argmax(outs, dim=-1)
 
                 loss_item = criterion(outs, labels).item()
+                # F1 score
+                F1 = create_criterion("f1")
+                _f1_item = F1(outs, labels).item()
+                f1_item = 1 - _f1_item
+
                 acc_item = (labels == preds).sum().item()
                 val_loss_items.append(loss_item)
                 val_acc_items.append(acc_item)
+                f1_items.append(f1_item)
 
                 if figure is None:
                     inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
@@ -259,22 +291,80 @@ def train(data_dir, model_dir, args):
 
             val_loss = np.sum(val_loss_items) / len(val_loader)
             val_acc = np.sum(val_acc_items) / len(val_set)
+            f1_score = np.sum(f1_items) / len(val_loader)
+
             best_val_loss = min(best_val_loss, val_loss)
-            if val_acc > best_val_acc:
-                print(f"New best model for val accuracy : {val_acc:4.2%}! saving the best model..")
-                torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
-                best_val_acc = val_acc
+            if not args.f1_acc:
+                if val_acc > best_val_acc:
+                    print(f"New best model for val accuracy : {val_acc:4.2%}! saving the best model..")
+                    torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                    best_val_acc = val_acc
+                    best_f1_score = f1_score
+            elif args.f1_acc:
+                if f1_score > best_f1_score:
+                    print(f"New best model for f1 score : {f1_score:4.2%}! saving the best model..")
+                    torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
+                    best_val_acc = val_acc
+                    best_f1_score = f1_score
+            
+            wrong = 0
+            age = 0
+            sex = 0
+            age_sex = 0
+            mask = 0
+            all = 0
+
+            for test_batch in test_loader:
+                inputs, labels = test_batch
+                inputs = inputs.to(device)
+                labels = labels.to(device)
+
+                outs = model(inputs)
+                preds_list = torch.sort(outs, dim=-1, )
+                preds = torch.argmax(outs, dim=-1)
+                
+                for i in range(64):
+                    all += 1
+                    if preds[i] != labels[i]:
+                        num = abs(preds[i] - labels[i])
+                        if num == 1:
+                            age += 1
+                        elif num == 3:
+                            sex += 1
+                        elif num == 4:
+                            age_sex += 1
+                        elif num == 6:
+                            mask += 1
+                        wrong += 1            
+
+                # F1 score
+                F1 = create_criterion("f1")
+                _f1_item = F1(outs, labels).item()
+                f1_item = 1 - _f1_item
+
+                acc_item = (labels == preds).sum().item()
+                #test_acc_items.append(acc_item)
+                #test_f1_items.append(f1_item)
+            
+            
+            print(f"전체 : {all}, 틀린갯수 : {wrong}, 나이 : {age}, 성별 : {sex}, 성별과 나이 : {age_sex}, 마스크 : {mask}")
+            test_acc = np.sum(test_acc_items) / len(test_set)
+            test_f1_score = np.sum(test_f1_items) / len(test_loader)
+
+
             torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
             print(
-                f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
-                f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
+                f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2}, f1_score: {f1_score:4.2%} || "
+                f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}, best f1_score : {best_f1_score:4.2%}"
             )
+            print(f"----------[Test] acc : {test_acc:4.2%}, f1_score: {test_f1_score:4.2%}")
             logger.add_scalar("Val/loss", val_loss, epoch)
             logger.add_scalar("Val/accuracy", val_acc, epoch)
+            logger.add_scalar("Val/f1_score", f1_score, epoch)
             logger.add_figure("results", figure, epoch)
             print()
-        nni.report_intermediate_result(val_acc)
-    nni.report_final_result(val_acc)
+        nni.report_intermediate_result(f1_score)
+    nni.report_final_result(f1_score)
 
 
 if __name__ == '__main__':
@@ -285,16 +375,16 @@ if __name__ == '__main__':
     load_dotenv(verbose=True)
 
     # Data and model checkpoints directories
-    parser.add_argument('--seed', type=int, default=42, help='random seed (default: 42)')
+    parser.add_argument('--seed', type=int, default=0, help='random seed (default: 42)')
     parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 20)')
-    parser.add_argument('--dataset', type=str, default='MaskBaseDataset', help='dataset augmentation type (default: MaskBaseDataset)')
+    parser.add_argument('--dataset', type=str, default='MaskBaseDataset', help='dataset augmentation type (default: MaskSplitByProfileDataset)')
     parser.add_argument('--augmentation', type=str, default='CustomAugmentation', help='data augmentation type (default: BaseAugmentation)')
     parser.add_argument("--resize", nargs="+", type=int, default=[224, 224], help='resize size for image when training')
     parser.add_argument('--batch_size', type=int, default=64, help='input batch size for training (default: 64)')
     parser.add_argument('--valid_batch_size', type=int, default=64, help='input batch size for validing (default: 1000)')
     parser.add_argument('--model', type=str, default='Preresnet18', help='model type (default: BaseModel)')
     parser.add_argument('--optimizer', type=str, default='Adam', help='optimizer type (default: Adam)')
-    parser.add_argument('--lr', type=float, default=1e-3, help='learning rate (default: 1e-3)')
+    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-3)')
     parser.add_argument('--val_ratio', type=float, default=0.2, help='ratio for validaton (default: 0.2)')
     parser.add_argument('--criterion', type=str, default='focal', help='criterion type (default: focal)')
     parser.add_argument('--lr_decay_step', type=int, default=20, help='learning rate scheduler deacy step (default: 20)')
@@ -307,6 +397,8 @@ if __name__ == '__main__':
     parser.add_argument('--reuse_param_exp', default='None', help='reuse parameters in ./model/exp_name')
     parser.add_argument('--freeze', default='False', help='freeze backbone')
     parser.add_argument('--unfreeze_param', type=str, default='None', help='unfreeze parameters')
+    parser.add_argument('--mix_up', default=True, help='mix_up')
+    parser.add_argument('--f1_acc', default=True, help='f1_acc')
 
     # Container environment
     parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_TRAIN', '/opt/ml/input/data/train/images'))
