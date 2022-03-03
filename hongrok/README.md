@@ -16,6 +16,7 @@
 
 ### Inference
 - `SM_CHANNEL_EVAL=[eval image dir] SM_CHANNEL_MODEL=[model saved dir] SM_OUTPUT_DATA_DIR=[inference output dir] python inference.py`
-`python inference.py `
+`SM_CHANNEL_MODEL=/opt/ml/exps/google_halfsize_epoch150_cutmix0.5_reg_aug_cosine SM_OUTPUT_DATA_DIR=/opt/ml/submissions python inference.py --model GoogLeNet`
+
 ### Evaluation
 - `SM_GROUND_TRUTH_DIR=[GT dir] SM_OUTPUT_DATA_DIR=[inference output dir] python evaluation.py`
