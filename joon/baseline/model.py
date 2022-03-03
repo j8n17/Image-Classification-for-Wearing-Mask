@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
+from efficientnet_pytorch import EfficientNet
 import timm
 
 
@@ -46,6 +47,53 @@ class Preresnet18(nn.Module):
         return self.resnet18(x)
 
 
+class Preresnet50(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.resnet50 = models.resnet50(pretrained=True)
+        self.resnet50.fc = nn.Linear(self.resnet50.fc.in_features, num_classes)
+
+    def forward(self, x):
+        return self.resnet50(x)
+
+class Preresnet152(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.resnet152 = models.resnet152(pretrained=True)
+        self.resnet152.fc = nn.Linear(self.resnet152.fc.in_features, num_classes)
+
+    def forward(self, x):
+        return self.resnet152(x)
+
+class B4(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.B4 = EfficientNet.from_pretrained('efficientnet-b4')
+        self.B4._fc = nn.Linear(self.B4._fc.in_features, num_classes, bias=True)
+
+    def forward(self, x):
+        return self.B4(x)
+
+class densenet(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.densenet = models.densenet161(pretrained=True)
+        self.densenet.classifier = nn.Linear(self.densenet.classifier.in_features, num_classes) #bias=False?
+
+    def forward(self, x):
+        return self.densenet(x)
+
+
+class timm_resnet18(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.resnet18 = timm.create_models("resnet18", pretrained=True, num_classes=num_classes)
+        self.resnet18.fc = nn.Linear(self.resnet18.fc.in_features, num_classes)
+
+    def forward(self, x):
+        return self.resnet18(x)
+
+
 # Custom Model Template
 class MyModel(nn.Module):
     def __init__(self, num_classes):
@@ -82,4 +130,51 @@ class ViT_base(nn.Module):
     
     def forward(self, x):
         return self.model(x)
+
+class ViT_Large(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = timm.create_model('vit_large_patch16_384', pretrained=True)
+        self.model.head = nn.Linear(self.model.head.in_features, num_classes, bias=True)
+    
+    def forward(self, x):
+        return self.model(x)
+
+class ViT_Large_21k(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = timm.create_model('vit_large_patch16_224_in21k', pretrained=True, num_classes=num_classes)
+    
+    def forward(self, x):
+        return self.model(x)
+
+class ViT_Tiny_21k(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = timm.create_model('vit_tiny_patch16_224_in21k', pretrained=True, num_classes=num_classes)
+    
+    def forward(self, x):
+        return self.model(x)
+
+class ViT_with_ResNet(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = timm.create_model('vit_large_patch16_384', pretrained=True)
+        self.model.head = nn.Linear(self.model.head.in_features, num_classes, bias=True)
+    
+    def forward(self, x):
+        x = self.model(x)
+        x = x.view(32, 32)
+        return x
+
+class SENet154(nn.Module):
+    def __init__(self, num_classes):
+        super().__init__()
+        self.model = timm.create_model('senet154')
+        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes, bias=True)
+    
+    def forward(self, x):
+        return self.model(x)
+
+
 

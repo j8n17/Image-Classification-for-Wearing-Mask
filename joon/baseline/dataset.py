@@ -8,7 +8,8 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset, Subset, random_split
-from torchvision.transforms import Resize, ToTensor, Normalize, Compose, CenterCrop, ColorJitter, RandomPerspective
+from torchvision.transforms import Resize, ToTensor, Normalize, Compose, CenterCrop, ColorJitter, RandomPerspective, RandomHorizontalFlip
+import itertools
 
 IMG_EXTENSIONS = [
     ".jpg", ".JPG", ".jpeg", ".JPEG", ".png",
@@ -23,6 +24,7 @@ def is_image_file(filename):
 class BaseAugmentation:
     def __init__(self, resize, mean, std, **args):
         self.transform = Compose([
+            CenterCrop((380, 380)),
             #Resize(resize, Image.BILINEAR),
             ToTensor(),
             Normalize(mean=mean, std=std),
@@ -52,8 +54,9 @@ class AddGaussianNoise(object):
 class CustomAugmentation:
     def __init__(self, resize, mean, std, **args):
         self.transform = Compose([
-            CenterCrop((430, 300)),
-            Resize(resize, Image.BILINEAR),
+            CenterCrop((380, 380)),
+            #Resize(resize, Image.BILINEAR),
+            RandomHorizontalFlip(p=0.5),
             ColorJitter(0.1, 0.1, 0.1, 0.1),
             ToTensor(),
             Normalize(mean=mean, std=std)
@@ -114,6 +117,7 @@ class MaskBaseDataset(Dataset):
         "mask4": MaskLabels.MASK,
         "mask5": MaskLabels.MASK,
         "incorrect_mask": MaskLabels.INCORRECT,
+        "incorrect_mask-1": MaskLabels.INCORRECT,
         "normal": MaskLabels.NORMAL
     }
 
@@ -174,8 +178,7 @@ class MaskBaseDataset(Dataset):
         self.transform = transform
 
     def __getitem__(self, index):
-        assert self.transform is not None, ".set_tranform 메소드를 이용하여 transform 을 주입해주세요"
-
+        #assert self.transform is not None, ".set_tranform 메소드를 이용하여 transform 을 주입해주세요"
         image = self.read_image(index)
         mask_label = self.get_mask_label(index)
         gender_label = self.get_gender_label(index)
@@ -221,7 +224,7 @@ class MaskBaseDataset(Dataset):
         img_cp = np.clip(img_cp, 0, 255).astype(np.uint8)
         return img_cp
 
-    def split_dataset(self) -> Tuple[Subset, Subset]:
+    def split_dataset(self) -> Tuple[Subset, Subset, Subset]:
         """
         데이터셋을 train 과 val 로 나눕니다,
         pytorch 내부의 torch.utils.data.random_split 함수를 사용하여
@@ -229,9 +232,13 @@ class MaskBaseDataset(Dataset):
         구현이 어렵지 않으니 구글링 혹은 IDE (e.g. pycharm) 의 navigation 기능을 통해 코드를 한 번 읽어보는 것을 추천드립니다^^
         """
         n_val = int(len(self) * self.val_ratio)
-        n_train = len(self) - n_val
-        train_set, val_set = random_split(self, [n_train, n_val])
-        return train_set, val_set
+        n_test = int(len(self) * 0.1)
+        n_train = int(len(self) - n_val)
+        #train_set, val_set, test_set = random_split(self, [n_train, n_val, n_test])
+        lengths = [n_train, n_val]
+        indices = torch.randperm(sum(lengths)).tolist()
+        
+        return [Subset(self, indices[offset - length : offset]) for offset, length in zip(itertools.accumulate(lengths), lengths)]
 
 
 class MaskSplitByProfileDataset(MaskBaseDataset):
@@ -250,12 +257,15 @@ class MaskSplitByProfileDataset(MaskBaseDataset):
     def _split_profile(profiles, val_ratio):
         length = len(profiles)
         n_val = int(length * val_ratio)
+        n_test = int(length * 0.1)
 
         val_indices = set(random.choices(range(length), k=n_val))
-        train_indices = set(range(length)) - val_indices
+        test_indices = set(random.choices(range(length), k=n_test))
+        train_indices = set(range(length)) - val_indices - test_indices
         return {
             "train": train_indices,
-            "val": val_indices
+            "val": val_indices,
+            "test": test_indices
         }
 
     def setup(self):

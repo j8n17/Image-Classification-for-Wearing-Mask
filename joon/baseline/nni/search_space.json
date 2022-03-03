@@ -1,0 +1,19 @@
+{
+    "optimizer": {
+        "_type": "choice",
+        "_value": [
+            "Adam",
+            "SGD",
+            "AdamW"
+        ]
+    },
+    "model": {
+        "_type": "choice",
+        "_value": [
+            "Preresnet18",
+            "ViT_base",
+            "BaseModel"
+        ]
+    }
+    
+}
