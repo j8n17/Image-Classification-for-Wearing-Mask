@@ -6,7 +6,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import TestDataset, MaskLabelDataset
+from dataset import EvalDataset, MaskLabelDataset
 
 
 def load_model(model_dir, saved_model, num_classes, model_name, device):
@@ -27,7 +27,7 @@ def load_model(model_dir, saved_model, num_classes, model_name, device):
 
 
 @torch.no_grad()
-def inference(data_dir, model_dir, output_dir, args):
+def eval(data_dir, model_dir, output_dir, args):
     """
     """
     use_cuda = torch.cuda.is_available()
@@ -45,12 +45,15 @@ def inference(data_dir, model_dir, output_dir, args):
     normal_model.eval()
     incorrect_model.eval()
 
-    img_root = os.path.join(data_dir, 'images')
-    info_path = os.path.join(data_dir, 'info.csv')
-    info = pd.read_csv(info_path)
-
-    img_paths = [os.path.join(img_root, img_id) for img_id in info.ImageID]
-    dataset = TestDataset(img_paths, args.resize)
+    dataset = EvalDataset(data_dir=args.data_dir, ratio=args.eval_ratio)
+    transform_cls = getattr(import_module("dataset"), args.augmentation)
+    # BaseAug
+    transform = transform_cls(
+        resize=args.resize,
+        mean=dataset.mean,
+        std=dataset.std,
+    )
+    dataset.set_transform(transform)
     loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -60,11 +63,13 @@ def inference(data_dir, model_dir, output_dir, args):
         drop_last=False,
     )
 
-    print("Calculating inference results..")
+    print("Calculating Evaluation results..")
     preds = []
+    labels = []
     with torch.no_grad():
-        for idx, images in enumerate(loader):
+        for images, label in loader:
             images = images.to(device)
+            labels.append(label[0])
             
             # 마스크 착용 여부 예측
             mask_label_pred = mask_label_model(images)
@@ -83,11 +88,15 @@ def inference(data_dir, model_dir, output_dir, args):
                 gender_age_pred = gender_age_pred.argmax(dim=-1)
 
             pred = mask_label_pred * 6 + gender_age_pred
-            preds.extend(pred.cpu().numpy())
+            # preds.extend(pred.cpu().numpy())
+            preds.append(pred)
 
-    info['ans'] = preds
-    info.to_csv(os.path.join(output_dir, f'output_googlenet_onlycrop.csv'), index=False)
-    print(f'Inference Done!')
+    labels = torch.tensor(labels)
+    preds = torch.tensor(preds)
+    acc = (labels == preds).sum().item() / len(loader)
+    # info['ans'] = preds
+    # info.to_csv(os.path.join(output_dir, f'output_googlenet.csv'), index=False)
+    print(f'Evaluation Done! accuracy : {acc:4.2%}')
 
 
 if __name__ == '__main__':
@@ -97,9 +106,10 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=1, help='input batch size for validing (default: 1000)') ########
     parser.add_argument('--resize', type=tuple, default=(96, 128), help='resize size for image when you trained (default: (96, 128))')
     parser.add_argument('--model', type=str, default='GoogLeNet', help='model type (default: BaseModel)')
+    parser.add_argument('--augmentation', type=str, default='BaseAugmentation', help='data augmentation type (default: BaseAugmentation)')
 
     # Container environment
-    parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/eval'))
+    parser.add_argument('--data_dir', type=str, default=os.environ.get('SM_CHANNEL_EVAL', '/opt/ml/input/data/train/images'))
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_CHANNEL_MODEL', './model'))
     parser.add_argument('--output_dir', type=str, default=os.environ.get('SM_OUTPUT_DATA_DIR', './output'))
 
@@ -114,6 +124,8 @@ if __name__ == '__main__':
     parser.add_argument('--normal_model', type=str, default='GoogLeNet')
     parser.add_argument('--incorrect_model', type=str, default='GoogLeNet')
 
+    parser.add_argument('--eval_ratio', type=float, default=0.5)
+
     args = parser.parse_args()
 
     data_dir = args.data_dir
@@ -122,4 +134,4 @@ if __name__ == '__main__':
 
     os.makedirs(output_dir, exist_ok=True)
 
-    inference(data_dir, model_dir, output_dir, args)
+    eval(data_dir, model_dir, output_dir, args)
