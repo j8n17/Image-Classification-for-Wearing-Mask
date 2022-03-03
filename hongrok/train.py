@@ -18,6 +18,34 @@ from torch.utils.tensorboard import SummaryWriter
 from dataset import MaskBaseDataset
 from loss import create_criterion
 
+from sklearn.metrics import f1_score
+import numpy as np
+
+
+# cutout
+def cutout(img, n_holes=1, size=10):
+    
+    h = img.shape[2]
+    w = img.shape[3]
+    
+    mask = np.ones((h, w), np.float16)
+        
+    for _ in range(n_holes):
+        y = np.random.randint(h*1/4, h*3/4)
+        x = np.random.randint(w*1/4, w*3/4)
+        
+        y1 = np.clip(y - size//2, 0, h)
+        y2 = np.clip(y + size//2, 0, h)
+        x1 = np.clip(x - size//3, 0, w)
+        x2 = np.clip(x + size//3, 0, w)
+        
+        mask[y1:y2, x1:x2] = 0
+    
+    mask = torch.from_numpy(mask)
+    mask = mask.expand_as(img)
+    img = img * mask.cuda()
+    
+    return img
 
 def seed_everything(seed):
     torch.manual_seed(seed)
@@ -86,12 +114,12 @@ def rand_bbox(size, lam):
     W = size[2]
     H = size[3]
     cut_rat = np.sqrt(1. - lam)
-    cut_w = np.int(W * cut_rat)
-    cut_h = np.int(H * cut_rat)
+    cut_w = np.int(W * cut_rat/2)
+    cut_h = np.int(H * cut_rat/2)
 
     # uniform
-    cx = np.random.randint(W)
-    cy = np.random.randint(H)
+    cx = np.random.randint(W*1/4, W*3/4)
+    cy = np.random.randint(H*1/4, H*3/4)
 
     bbx1 = np.clip(cx - cut_w // 2, 0, W)
     bby1 = np.clip(cy - cut_h // 2, 0, H)
@@ -109,7 +137,7 @@ def train(data_dir, model_dir, args):
     use_cuda = torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    # -- dataset # label 3개로 바꾸기
+    # -- dataset 
     dataset_module = getattr(import_module("dataset"), args.dataset)  # default: BaseAugmentation
     dataset = dataset_module(
         data_dir=data_dir,
@@ -152,14 +180,14 @@ def train(data_dir, model_dir, args):
         drop_last=True,
     )
 
-    # -- model # 모델 바꾸기
+    # -- model
     model_module = getattr(import_module("model"), args.model)  # default: BaseModel
     model = model_module(
         num_classes=num_classes
     ).to(device)
     model = torch.nn.DataParallel(model)
 
-    # -- loss & metric # criterion추가
+    # -- loss & metric
     criterion = create_criterion(args.criterion)  # default: cross_entropy
     opt_module = getattr(import_module("torch.optim"), args.optimizer)  # default: SGD
     optimizer = opt_module(
@@ -176,6 +204,7 @@ def train(data_dir, model_dir, args):
 
     best_val_acc = 0
     best_val_loss = np.inf
+    best_val_f1 = 0
     for epoch in range(args.epochs):
         # train loop
         dataset.set_transform(transform)
@@ -184,11 +213,17 @@ def train(data_dir, model_dir, args):
         matches = 0
         figure = None
         for idx, train_batch in enumerate(train_loader):
-            inputs, labels = train_batch # labels 수정
+            inputs, labels = train_batch
             inputs = inputs.to(device)
             labels = labels.to(device)
 
             optimizer.zero_grad()
+            
+            # cutout
+            r2 = np.random.rand(1)
+            if r2 < args.cutout_prob:
+                inputs = cutout(inputs, args.cutout_holes, args.cutout_size)
+
             # cutmix
             r = np.random.rand(1) 
             if args.beta > 0 and r < args.cutmix_prob:
@@ -205,14 +240,14 @@ def train(data_dir, model_dir, args):
                 loss = criterion(outs, target_a) * lam + criterion(outs, target_b) * (1. - lam)
 
             else:
-                outs = model(inputs) # output 추가
-                preds = torch.argmax(outs, dim=-1) # ?
-                loss = criterion(outs, labels) # loss 추가
+                outs = model(inputs) 
+                preds = torch.argmax(outs, dim=-1)
+                loss = criterion(outs, labels)
 
             loss.backward()
             optimizer.step()
             
-            if figure is None: # 수정
+            if figure is None:
                 inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
                 inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
                 figure = grid_image(
@@ -220,20 +255,23 @@ def train(data_dir, model_dir, args):
                 )
             
             loss_value += loss.item()
-            matches += (preds == labels).sum().item() # 수정
+            matches += (preds == labels).sum().item() 
             if (idx + 1) % args.log_interval == 0:
                 train_loss = loss_value / args.log_interval
-                train_acc = matches / args.batch_size / args.log_interval #수정
+                train_acc = matches / args.batch_size / args.log_interval 
+                train_f1= f1_score(labels.cpu().data, preds.cpu(), average='macro').mean() # f1_score
                 current_lr = get_lr(optimizer)
                 print(
                     f"Epoch[{epoch}/{args.epochs}]({idx + 1}/{len(train_loader)}) || "
-                    f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} || lr {current_lr}" #수정
-                )
+                    f"training loss {train_loss:4.4} || training accuracy {train_acc:4.2%} "
+                    f"|| training f1score {train_f1:4.2} || lr {current_lr}" 
+                )#f1_score
                 logger.add_scalar("Train/loss", train_loss, epoch * len(train_loader) + idx)
-                logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx) #수정
+                logger.add_scalar("Train/accuracy", train_acc, epoch * len(train_loader) + idx)
+                logger.add_scalar("Train/f1score", train_f1, epoch * len(train_loader) + idx) # f1_score
                 logger.add_figure("results", figure, epoch)
                 loss_value = 0
-                matches = 0 #수정
+                matches = 0
 
         scheduler.step()
 
@@ -243,22 +281,26 @@ def train(data_dir, model_dir, args):
             dataset.set_transform(val_transform)
             model.eval()
             val_loss_items = []
-            val_acc_items = [] #수정
+            val_acc_items = []
+            val_y_pred = [] #f1_score
+            val_y_true = []
             # figure = None
             for val_batch in val_loader:
-                inputs, labels = val_batch #label 수정
+                inputs, labels = val_batch 
                 inputs = inputs.to(device)
-                labels = labels.to(device) #
+                labels = labels.to(device)
 
                 outs = model(inputs)
-                preds = torch.argmax(outs, dim=-1) # 수정
+                preds = torch.argmax(outs, dim=-1)
 
                 loss_item = criterion(outs, labels).item()
-                acc_item = (labels == preds).sum().item() #수정
+                acc_item = (labels == preds).sum().item()
                 val_loss_items.append(loss_item)
-                val_acc_items.append(acc_item)#수정
-
-                # if figure is None: # 수정
+                val_acc_items.append(acc_item)
+                #f1_score
+                val_y_pred.extend(preds.cpu())
+                val_y_true.extend(labels.cpu().data)
+                # if figure is None:
                 #     inputs_np = torch.clone(inputs).detach().cpu().permute(0, 2, 3, 1).numpy()
                 #     inputs_np = dataset_module.denormalize_image(inputs_np, dataset.mean, dataset.std)
                 #     figure = grid_image(
@@ -266,19 +308,25 @@ def train(data_dir, model_dir, args):
                 #     )
 
             val_loss = np.sum(val_loss_items) / len(val_loader)
-            val_acc = np.sum(val_acc_items) / len(val_set) #수정
+            val_acc = np.sum(val_acc_items) / len(val_set) 
+            val_f1 = f1_score(val_y_true, val_y_pred, average='macro')# f1_score
+            
+            best_val_f1 = max(best_val_f1, val_f1)
             best_val_loss = min(best_val_loss, val_loss)
-            if val_acc > best_val_acc: #수정
+            if val_acc > best_val_acc:
                 print(f"New best model for val accuracy : {val_acc:4.2%}! saving the best model..")
                 torch.save(model.module.state_dict(), f"{save_dir}/best.pth")
                 best_val_acc = val_acc
             torch.save(model.module.state_dict(), f"{save_dir}/last.pth")
             print(
                 f"[Val] acc : {val_acc:4.2%}, loss: {val_loss:4.2} || "
-                f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2}"
-            )#수정
+                f" f1score: {val_f1:4.2} || "
+                f"best acc : {best_val_acc:4.2%}, best loss: {best_val_loss:4.2} || "
+                f"best f1score: {best_val_f1:4.2%}"
+            )# f1score
             logger.add_scalar("Val/loss", val_loss, epoch)
-            logger.add_scalar("Val/accuracy", val_acc, epoch)#수정
+            logger.add_scalar("Val/accuracy", val_acc, epoch)
+            logger.add_scalar("Val/f1score", val_f1, epoch) #f1score
             # logger.add_figure("results", figure, epoch)
             print()
 
@@ -313,7 +361,12 @@ if __name__ == '__main__':
     
     # cutmix
     parser.add_argument('--beta', type=float, default=0)
-    parser.add_argument('--cutmix_prob', type=float, default=0.5)
+    parser.add_argument('--cutmix_prob', type=float, default=0)
+
+    # cutout
+    parser.add_argument('--cutout_prob', type=float, default=0)
+    parser.add_argument('--cutout_size', type=int, default=100)
+    parser.add_argument('--cutout_holes', type=int, default=1)
 
     args = parser.parse_args()
     print(args)
