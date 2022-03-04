@@ -161,7 +161,11 @@ def train(data_dir, model_dir, args):
 
     # -- data_loader
     train_set, val_set = dataset.split_dataset()
-
+    
+    # sampler
+    n_cls = torch.FloatTensor([2745, 2050, 415, 3660, 4085, 545, 549, 410, 83, 732, 817, 109, 549, 410, 83, 732, 817, 109])
+    cls_weight = n_cls/sum(n_cls)
+    
     train_loader = DataLoader(
         train_set,
         batch_size=args.batch_size,

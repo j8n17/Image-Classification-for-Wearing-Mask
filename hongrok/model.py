@@ -83,10 +83,10 @@ class ResNext(nn.Module):
     def __init__(self, num_classes):
         super().__init__()
         self.m = models.resnext50_32x4d(pretrained=True)
-        # self.m.fc = nn.Sequential(
-        #     nn.Dropout(0.5),
-        #     nn.Linear(self.m.fc.in_features, num_classes)
-        # )
+        self.m.fc = nn.Sequential(
+            nn.Dropout(0.5),
+            nn.Linear(self.m.fc.in_features, num_classes)
+        )
     
     def forward(self, x):
         return self.m(x)
