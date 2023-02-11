@@ -31,8 +31,8 @@
   
   예시
   <center class="half">
-    <img src="https://user-images.githubusercontent.com/85532197/218266762-ee440bb7-4c7f-47a3-8ef2-41c40ee05ee9.png" width="300"/>
-    <img src="https://user-images.githubusercontent.com/85532197/218266527-78784c78-3373-478d-a4a5-d73de3475a6f.png" width="500"/>
+    <img src="https://user-images.githubusercontent.com/85532197/218266762-ee440bb7-4c7f-47a3-8ef2-41c40ee05ee9.png" width="200"/>
+    <img src="https://user-images.githubusercontent.com/85532197/218266527-78784c78-3373-478d-a4a5-d73de3475a6f.png" width="333"/>
   <center>
 
 * 기대 효과
